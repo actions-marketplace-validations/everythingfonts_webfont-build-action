@@ -55,11 +55,11 @@ jobs:
 | `api-key` | required | Everything Fonts API key (store it as a repository secret). |
 | `sources` | required | Glob patterns (one per line or comma-separated) of the font files to convert. |
 | `formats` | `woff2` | Comma-separated output formats. |
-| `subset` | none | Comma-separated subset preset ids. No subsetting when empty. |
+| `subset` | none | Comma-separated subset preset ids. No subsetting when empty. On plans without custom presets, presets other than the character presets are skipped. |
 | `output-dir` | `webfonts/` | Directory the built font files are written to. |
 | `css-file` | `webfonts/fonts.css` | Path of the generated @font-face stylesheet. |
 | `font-display` | `swap` | The font-display value written into the @font-face rules. |
-| `api-url` | `https://font.rest/api/v1` | Base URL of the Everything Fonts API. |
+| `api-url` | `https://font.rest/api/v1` | Base URL of the Everything Fonts API. Must be `https` (plain `http` only for `localhost` and `127.0.0.1`). Empty uses the default. |
 | `timeout-minutes` | `10` | Overall time to wait for builds to finish. |
 
 ## Outputs
@@ -69,9 +69,15 @@ jobs:
 | `files` | Newline-separated list of the files that were written. |
 | `css-path` | Path of the generated stylesheet. |
 
+## The stylesheet
+
+Each source font becomes its own `@font-face` family, named after its file name without the extension (`fonts/Inter-Bold.ttf` becomes `Inter-Bold`). No `font-weight` or `font-style` is declared, so set them in your own CSS if you group several files into one family.
+
+Two sources that would produce the same output file (for example `Inter.ttf` and `Inter.otf`) stop the build before anything is written. Rename one of them, or build them in separate steps with different `output-dir`.
+
 ## How jobs are counted
 
-Each source font uses one upload job and one kit job. When `subset` is set, each font also uses one subset job. Your API plan's monthly job allowance covers them. If you run out, the step fails with a link to upgrade.
+Each source font uses one upload job and one kit job. When `subset` is set, each font also uses one subset job and a second upload (the subset font), so two uploads per font. Your API plan's monthly job allowance covers them. If you run out, the step fails with a link to upgrade.
 
 ## Pull requests from forks
 
@@ -79,7 +85,7 @@ Workflows triggered by a pull request from a fork do not get repository secrets,
 
 ## Privacy
 
-Your fonts are uploaded to Everything Fonts to be converted. The repository is identified only by a SHA-256 hash of its name, never the name itself. The API key is masked and never logged. Output files are written inside the workspace.
+Your fonts are uploaded to Everything Fonts to be converted. The repository is identified only by a SHA-256 hash of its name, never the name itself. The API key is masked and never logged. Output files are written inside the workspace: an `output-dir` or `css-file` that leads outside it through a symbolic link, or an output file that already exists as a symbolic link, is refused before anything is written.
 
 ## Licence
 
