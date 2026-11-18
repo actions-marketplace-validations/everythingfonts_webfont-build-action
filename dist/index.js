@@ -38844,6 +38844,7 @@ async function assertRealPathInsideWorkspace(workspace, directory, value, inputN
 
 const NO_KEY_MESSAGE = 'Web Font Build needs an Everything Fonts API key with conversion — add it as a secret; secrets are not available to pull requests from forks.';
 const PLAN_MESSAGE = 'Web Font Build needs an API plan with conversion — see https://everythingfonts.com/api';
+const KEY_REJECTED_MESSAGE = 'Everything Fonts rejected the API key (HTTP 401). Check the api-key secret (EVERYTHINGFONTS_API_KEY).';
 const RETRY_HINT = 'The Everything Fonts API is unavailable; try again in a few minutes.';
 const DEFAULT_API_URL = 'https://font.rest/api/v1';
 let outputsSet = false;
@@ -38864,7 +38865,10 @@ function explain(error) {
     if (!(error instanceof EfApiError)) {
         return error;
     }
-    if (error.status === 401 || (error.status === 403 && !error.isQuota())) {
+    if (error.status === 401) {
+        return new Error(KEY_REJECTED_MESSAGE);
+    }
+    if (error.status === 403 && !error.isQuota()) {
         return new Error(PLAN_MESSAGE);
     }
     if (error.status === 0 || error.status >= 500) {

@@ -18,6 +18,9 @@ export const NO_KEY_MESSAGE =
 
 export const PLAN_MESSAGE = 'Web Font Build needs an API plan with conversion — see https://everythingfonts.com/api';
 
+export const KEY_REJECTED_MESSAGE =
+  'Everything Fonts rejected the API key (HTTP 401). Check the api-key secret (EVERYTHINGFONTS_API_KEY).';
+
 const RETRY_HINT = 'The Everything Fonts API is unavailable; try again in a few minutes.';
 
 const DEFAULT_API_URL = 'https://font.rest/api/v1';
@@ -43,7 +46,10 @@ function explain(error: unknown): unknown {
   if (!(error instanceof EfApiError)) {
     return error;
   }
-  if (error.status === 401 || (error.status === 403 && !error.isQuota())) {
+  if (error.status === 401) {
+    return new Error(KEY_REJECTED_MESSAGE);
+  }
+  if (error.status === 403 && !error.isQuota()) {
     return new Error(PLAN_MESSAGE);
   }
   if (error.status === 0 || error.status >= 500) {

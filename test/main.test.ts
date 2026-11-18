@@ -90,12 +90,14 @@ describe('run', () => {
     expect(output('files')).toBe('');
   });
 
-  it('fails with the plan message when the build answers 401', async () => {
+  it('fails with the key message, not the plan message, when the API answers 401', async () => {
     setInputs({ 'api-key': 'k', sources: 'src/*.ttf' });
     vi.mocked(buildWebfonts).mockRejectedValue(new EfApiError('nope', { status: 401 }));
     await runAction();
 
-    expect(core.setFailed).toHaveBeenCalledWith(PLAN_MESSAGE);
+    expect(core.setFailed).toHaveBeenCalledWith(
+      'Everything Fonts rejected the API key (HTTP 401). Check the api-key secret (EVERYTHINGFONTS_API_KEY).',
+    );
   });
 
   it('fails on an unknown preset, listing the valid ids', async () => {
