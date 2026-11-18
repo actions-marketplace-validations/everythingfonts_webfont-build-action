@@ -97,8 +97,9 @@ function readKit(zip: Uint8Array, formats: string[], sourceName: string): Kit {
 /** A failed download is not a key problem: the API error type is dropped so it is not read as one. */
 const downloadFailure = (error: unknown): Error => new Error(error instanceof Error ? error.message : String(error));
 
-/** Downloads the kit; an expired link (403/410) is refreshed once through the kit status. */
+/** Downloads the kit (each signed link is masked first); an expired link (403/410) is refreshed once through the kit status. */
 async function downloadKit(api: BuildApi, kitId: string, url: string): Promise<Uint8Array> {
+  core.setSecret(url);
   try {
     return await api.download(url);
   } catch (error) {
@@ -110,6 +111,7 @@ async function downloadKit(api: BuildApi, kitId: string, url: string): Promise<U
   if (kit.downloadurl === null) {
     throw new Error(`The download link of kit ${kitId} expired and no fresh link is available (${kit.status}).`);
   }
+  core.setSecret(kit.downloadurl);
   try {
     return await api.download(kit.downloadurl);
   } catch (error) {

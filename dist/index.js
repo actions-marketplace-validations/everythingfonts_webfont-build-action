@@ -34876,8 +34876,9 @@ function readKit(zip, formats, sourceName) {
 }
 /** A failed download is not a key problem: the API error type is dropped so it is not read as one. */
 const downloadFailure = (error) => new Error(error instanceof Error ? error.message : String(error));
-/** Downloads the kit; an expired link (403/410) is refreshed once through the kit status. */
+/** Downloads the kit (each signed link is masked first); an expired link (403/410) is refreshed once through the kit status. */
 async function downloadKit(api, kitId, url) {
+    core_setSecret(url);
     try {
         return await api.download(url);
     }
@@ -34890,6 +34891,7 @@ async function downloadKit(api, kitId, url) {
     if (kit.downloadurl === null) {
         throw new Error(`The download link of kit ${kitId} expired and no fresh link is available (${kit.status}).`);
     }
+    core_setSecret(kit.downloadurl);
     try {
         return await api.download(kit.downloadurl);
     }

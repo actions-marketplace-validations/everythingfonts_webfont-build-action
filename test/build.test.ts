@@ -3,10 +3,11 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, symlinkS
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as core from '@actions/core';
 import { EfApiError } from '../src/api';
 import { buildWebfonts, type BuildApi } from '../src/build';
 
-vi.mock('@actions/core', () => ({ info: vi.fn(), warning: vi.fn() }));
+vi.mock('@actions/core', () => ({ info: vi.fn(), warning: vi.fn(), setSecret: vi.fn() }));
 
 const stylesheet = (family: string): string =>
   `@font-face {\n  font-family: '${family}';\n  src: url('${family}.woff2') format('woff2');\n}\n`;
@@ -58,6 +59,7 @@ const source = (name: string): string => {
 };
 
 beforeEach(() => {
+  vi.clearAllMocks();
   workspace = mkdtempSync(join(tmpdir(), 'wfb-build-'));
   api = {
     uploadFont: vi.fn(async () => 'font-1'),
@@ -116,6 +118,13 @@ describe('buildWebfonts', () => {
     expect(api.fontfaceKit).toHaveBeenCalledWith('subset-1', ['woff2']);
   });
 
+  it('masks the signed download link before downloading it', async () => {
+    await build([source('Inter.ttf')]);
+
+    expect(core.setSecret).toHaveBeenCalledWith('https://files.example/kit.zip?signature=a');
+    expect(vi.mocked(core.setSecret).mock.invocationCallOrder[0]).toBeLessThan(api.download.mock.invocationCallOrder[0]!);
+  });
+
   it('refreshes an expired download link once through the kit status', async () => {
     api.download
       .mockRejectedValueOnce(new EfApiError('expired', { status: 410 }))
@@ -126,6 +135,7 @@ describe('buildWebfonts', () => {
 
     expect(api.kitStatus).toHaveBeenCalledTimes(1);
     expect(api.download).toHaveBeenLastCalledWith('https://files.example/fresh.zip');
+    expect(core.setSecret).toHaveBeenCalledWith('https://files.example/fresh.zip');
     expect(result.files).toHaveLength(1);
   });
 
