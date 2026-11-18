@@ -80,6 +80,7 @@ interface RequestOptions {
   timeoutMs?: number;
   binary?: boolean;
   external?: boolean;
+  accept?: string;
 }
 
 const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -219,7 +220,9 @@ export class EfApi {
       }
       const remaining = deadline - this.now();
       if (remaining <= 0) {
-        throw new Error(`Timed out waiting for kit ${kitId} after ${Math.round(opts.timeoutMs / 1000)} seconds.`);
+        throw new Error(
+          `Timed out waiting for kit ${kitId} after ${Math.round(opts.timeoutMs / 1000)} seconds (last status: ${kit.status || 'unknown'}).`,
+        );
       }
       await this.sleep(Math.min(delay, remaining));
       delay = Math.min(delay * 2, POLL_CAP_MS);
@@ -231,7 +234,7 @@ export class EfApi {
     if (targetformat) {
       path += `&targetformat=${encodeURIComponent(targetformat)}`;
     }
-    const { body } = await this.request('GET', path, { binary: true });
+    const { body } = await this.request('GET', path, { binary: true, accept: 'application/octet-stream, application/json' });
     return body as Uint8Array;
   }
 
@@ -253,10 +256,10 @@ export class EfApi {
     throw new EfApiError('Unexpected response from the Everything Fonts API.', { status: 200, body });
   }
 
-  private headers(): Headers {
+  private headers(accept = 'application/json'): Headers {
     const headers = new Headers({
       Authorization: `Bearer ${this.apiKey}`,
-      Accept: 'application/json',
+      Accept: accept,
       'X-EverythingFonts-Client': this.client,
     });
     if (this.repo) {
@@ -267,6 +270,25 @@ export class EfApi {
 
   private scrub(text: string): string {
     return this.apiKey ? text.split(this.apiKey).join('***') : text;
+  }
+
+  /** Removes a signed URL, its query string and each query value from text. */
+  private scrubUrl(text: string, url: string): string {
+    const parts: string[] = [url];
+    try {
+      const parsed = new URL(url);
+      parts.push(parsed.search, parsed.search.replace(/^\?/, ''));
+      for (const value of parsed.searchParams.values()) {
+        parts.push(value, encodeURIComponent(value));
+      }
+    } catch {
+      // not a parseable URL: the full string is still removed
+    }
+    let result = text;
+    for (const part of parts.filter((p) => p.length > 1).sort((a, b) => b.length - a.length)) {
+      result = result.split(part).join('***');
+    }
+    return result;
   }
 
   private scrubBody(body: unknown): unknown {
@@ -300,7 +322,8 @@ export class EfApi {
     path: string,
     options: RequestOptions = {},
   ): Promise<{ body: unknown; headers: Headers }> {
-    const { makeBody, deadline, binary = false, external = false } = options;
+    const { makeBody, deadline, binary = false, external = false, accept } = options;
+    const clean = (text: string): string => (external ? this.scrubUrl(this.scrub(text), path) : this.scrub(text));
     const perRequestMs = options.timeoutMs ?? this.requestTimeoutMs;
     for (let attempt = 0; ; attempt++) {
       const timeoutMs =
@@ -309,7 +332,7 @@ export class EfApi {
       try {
         response = await fetch(external ? path : `${this.baseUrl}${path}`, {
           method,
-          headers: external ? new Headers() : this.headers(),
+          headers: external ? new Headers() : this.headers(accept),
           body: makeBody?.(),
           signal: AbortSignal.timeout(timeoutMs),
         });
@@ -317,7 +340,9 @@ export class EfApi {
         const reason = error instanceof Error ? error.message : String(error);
         const timedOut = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
         throw new EfApiError(
-          this.scrub(
+          external
+            ? 'Could not download the built files \u2014 try again.'
+            : this.scrub(
             timedOut
               ? `The Everything Fonts API did not answer within ${Math.round(timeoutMs / 1000)} seconds.`
               : `Could not reach the Everything Fonts API: ${reason}`,
@@ -347,12 +372,17 @@ export class EfApi {
         (typeof error?.message === 'string' && error.message) ||
         (isRecord(body) && typeof body.message === 'string' && body.message) ||
         `HTTP ${response.status}`;
-      const apiError = new EfApiError(this.scrub(`Everything Fonts API error (${response.status}): ${message}`), {
-        status: response.status,
-        type: typeof error?.type === 'string' ? error.type : undefined,
-        allowance: allowanceFromBody(body) ?? allowanceFromHeaders(response.headers),
-        body: this.scrubBody(body),
-      });
+      const apiError = external
+        ? new EfApiError(`Downloading the built files failed (HTTP ${response.status}). The link may have expired; re-run the job.`, {
+            status: response.status,
+            body: clean(text.slice(0, 200)),
+          })
+        : new EfApiError(this.scrub(`Everything Fonts API error (${response.status}): ${message}`), {
+            status: response.status,
+            type: typeof error?.type === 'string' ? error.type : undefined,
+            allowance: allowanceFromBody(body) ?? allowanceFromHeaders(response.headers),
+            body: this.scrubBody(body),
+          });
 
       if (response.status !== 429 || apiError.isQuota() || attempt >= MAX_RATE_LIMIT_RETRIES) {
         throw apiError;

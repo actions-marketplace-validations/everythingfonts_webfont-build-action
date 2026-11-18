@@ -385,7 +385,7 @@ describe('kitStatus and waitForKit', () => {
 
     await expect(
       makeApi('owner/repo', { now: () => clock }).waitForKit('kit-1', { timeoutMs: 10000 }),
-    ).rejects.toThrow(/timed out/i);
+    ).rejects.toThrow(/timed out.*last status: PROCESSING/i);
   });
 });
 
@@ -401,6 +401,9 @@ describe('subset', () => {
     expect(Array.from(bytes)).toEqual([1, 2, 3, 4]);
     expect(fetchMock.mock.calls[0][0]).toBe(
       'https://font.rest/api/v1/font/font-9/subset?preset=latin,latin-ext&binaryresult=true&targetformat=woff2',
+    );
+    expect(new Headers(fetchMock.mock.calls[0][1].headers).get('Accept')).toBe(
+      'application/octet-stream, application/json',
     );
   });
 
@@ -439,17 +442,42 @@ describe('download', () => {
     expect(names.filter((n) => n.startsWith('x-everythingfonts'))).toEqual([]);
   });
 
-  it('maps a timeout to a 300 second message', async () => {
+  it('maps a timeout to the download copy', async () => {
     fetchMock.mockRejectedValue(new DOMException('timed out', 'TimeoutError'));
 
     const error = (await makeApi().download('https://files.example/kit.zip').catch((e: unknown) => e)) as EfApiError;
 
-    expect(error.message).toMatch(/within 300 seconds/);
+    expect(error.message).toBe('Could not download the built files \u2014 try again.');
   });
 
   it('throws EfApiError on a non-2xx response', async () => {
     fetchMock.mockResolvedValue(new Response('expired', { status: 403 }));
 
-    await expect(makeApi().download('https://files.example/kit.zip')).rejects.toMatchObject({ status: 403 });
+    const error = (await makeApi().download('https://files.example/kit.zip').catch((e: unknown) => e)) as EfApiError;
+
+    expect(error.status).toBe(403);
+    expect(error.message).toBe(
+      'Downloading the built files failed (HTTP 403). The link may have expired; re-run the job.',
+    );
+  });
+
+  it('scrubs the signed url and query from the message and body of a failed download', async () => {
+    const url = 'https://x/kit.zip?expires=1&signature=abc';
+    fetchMock.mockResolvedValue(new Response(`bad ${url} signature=abc expires=1&signature=abc`, { status: 403 }));
+
+    const error = (await makeApi().download(url).catch((e: unknown) => e)) as EfApiError;
+
+    const dump = `${error.message} ${JSON.stringify(error.body)}`;
+    expect(dump).not.toContain('abc');
+    expect(dump).not.toContain('expires=1');
+  });
+
+  it('uses its own copy for a failed network download and scrubs the url', async () => {
+    fetchMock.mockRejectedValue(new TypeError('fetch failed https://x/kit.zip?signature=abc'));
+
+    const error = (await makeApi().download('https://x/kit.zip?signature=abc').catch((e: unknown) => e)) as EfApiError;
+
+    expect(error.status).toBe(0);
+    expect(error.message).toBe('Could not download the built files \u2014 try again.');
   });
 });
