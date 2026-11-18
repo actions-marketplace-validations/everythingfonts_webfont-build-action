@@ -34842,6 +34842,19 @@ async function buildKit(api, source, options, deadline, tempDir) {
     const url = await api.waitForKit(kitId, { timeoutMs: remaining });
     return readKit(await downloadKit(api, kitId, url), options.formats, sourceName);
 }
+/** Throws when `path` exists as a symbolic link: writing would follow it, possibly out of the workspace. */
+async function refuseSymlink(path) {
+    try {
+        if ((await (0,promises_namespaceObject.lstat)(path)).isSymbolicLink()) {
+            throw new Error(`Refusing to write ${path}: it is a symbolic link.`);
+        }
+    }
+    catch (error) {
+        if (error.code !== 'ENOENT') {
+            throw error;
+        }
+    }
+}
 /** Builds every source, then writes the fonts and one merged stylesheet. Nothing is written if any source fails. */
 async function buildWebfonts(api, sources, options) {
     const deadline = Date.now() + options.timeoutMs;
@@ -34869,10 +34882,13 @@ async function buildWebfonts(api, sources, options) {
             await (0,promises_namespaceObject.rm)(temp, { recursive: true, force: true });
         }
     }
+    const targets = [...files.values()].map(({ name, bytes }) => ({ path: (0,external_node_path_namespaceObject.join)(options.outputDir, name), bytes }));
+    for (const path of [...targets.map((target) => target.path), options.cssFile]) {
+        await refuseSymlink(path);
+    }
     await (0,promises_namespaceObject.mkdir)(options.outputDir, { recursive: true });
     const written = [];
-    for (const { name, bytes } of files.values()) {
-        const path = (0,external_node_path_namespaceObject.join)(options.outputDir, name);
+    for (const { path, bytes } of targets) {
         await (0,promises_namespaceObject.writeFile)(path, bytes);
         written.push(path);
     }
@@ -38671,6 +38687,7 @@ async function findFonts(options) {
 
 ;// CONCATENATED MODULE: ./src/inputs.ts
 
+
 const SUPPORTED_FORMATS = ['woff2', 'woff', 'ttf', 'eot', 'svg'];
 const FONT_DISPLAY_VALUES = ['auto', 'block', 'swap', 'fallback', 'optional'];
 /** Comma- or newline-separated values, trimmed, without empties or repeats. */
@@ -38702,14 +38719,46 @@ function parseTimeoutMinutes(value) {
     }
     return minutes;
 }
+const isInside = (root, path) => {
+    const fromRoot = (0,external_node_path_namespaceObject.relative)(root, path);
+    return !(fromRoot === '..' || fromRoot.startsWith(`..${external_node_path_namespaceObject.sep}`) || (0,external_node_path_namespaceObject.isAbsolute)(fromRoot));
+};
 /** Resolves `value` against the workspace and refuses a path that leaves it. */
 function resolveInsideWorkspace(workspace, value, inputName) {
     const path = (0,external_node_path_namespaceObject.resolve)(workspace, value);
-    const fromWorkspace = (0,external_node_path_namespaceObject.relative)((0,external_node_path_namespaceObject.resolve)(workspace), path);
-    if (fromWorkspace === '..' || fromWorkspace.startsWith(`..${external_node_path_namespaceObject.sep}`) || (0,external_node_path_namespaceObject.isAbsolute)(fromWorkspace)) {
+    if (!isInside((0,external_node_path_namespaceObject.resolve)(workspace), path)) {
         throw new Error(`Input ${inputName} must be inside the workspace, got "${value}".`);
     }
     return path;
+}
+/** The real path of the nearest existing ancestor (symlinks resolved), with the missing rest appended. */
+async function realPathOfNearestExisting(path) {
+    const missing = [];
+    let current = (0,external_node_path_namespaceObject.resolve)(path);
+    for (;;) {
+        try {
+            return (0,external_node_path_namespaceObject.join)(await (0,promises_namespaceObject.realpath)(current), ...missing.reverse());
+        }
+        catch (error) {
+            const parent = (0,external_node_path_namespaceObject.dirname)(current);
+            const code = error.code;
+            if ((code !== 'ENOENT' && code !== 'ENOTDIR') || parent === current) {
+                throw error;
+            }
+            missing.push((0,external_node_path_namespaceObject.basename)(current));
+            current = parent;
+        }
+    }
+}
+/** Refuses a directory that the lexical check accepted but that leads outside the workspace through a symlink. */
+async function assertRealPathInsideWorkspace(workspace, directory, value, inputName) {
+    const [realWorkspace, realDirectory] = await Promise.all([
+        realPathOfNearestExisting(workspace),
+        realPathOfNearestExisting(directory),
+    ]);
+    if (!isInside(realWorkspace, realDirectory)) {
+        throw new Error(`Input ${inputName} must be inside the workspace, got "${value}" (it leads outside through a symbolic link).`);
+    }
 }
 
 ;// CONCATENATED MODULE: ./src/run.ts
@@ -38765,8 +38814,12 @@ async function run() {
     const subset = parseList(getInput('subset'));
     const fontDisplay = parseFontDisplay(getInput('font-display'));
     const timeoutMs = parseTimeoutMinutes(getInput('timeout-minutes')) * 60000;
-    const outputDir = resolveInsideWorkspace(workspace, getInput('output-dir') || 'webfonts/', 'output-dir');
-    const cssFile = resolveInsideWorkspace(workspace, getInput('css-file') || 'webfonts/fonts.css', 'css-file');
+    const outputDirInput = getInput('output-dir') || 'webfonts/';
+    const cssFileInput = getInput('css-file') || 'webfonts/fonts.css';
+    const outputDir = resolveInsideWorkspace(workspace, outputDirInput, 'output-dir');
+    const cssFile = resolveInsideWorkspace(workspace, cssFileInput, 'css-file');
+    await assertRealPathInsideWorkspace(workspace, outputDir, outputDirInput, 'output-dir');
+    await assertRealPathInsideWorkspace(workspace, (0,external_node_path_namespaceObject.dirname)(cssFile), cssFileInput, 'css-file');
     const patterns = getInput('sources', { required: true });
     const sources = await findFonts({ patterns });
     if (sources.length === 0) {

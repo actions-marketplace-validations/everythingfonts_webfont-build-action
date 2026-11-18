@@ -1,6 +1,6 @@
 import * as core from '@actions/core';
 import { strFromU8, unzipSync } from 'fflate';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, extname, join } from 'node:path';
 import { EfApiError, type EfApi } from './api';
@@ -112,6 +112,19 @@ async function buildKit(
   return readKit(await downloadKit(api, kitId, url), options.formats, sourceName);
 }
 
+/** Throws when `path` exists as a symbolic link: writing would follow it, possibly out of the workspace. */
+async function refuseSymlink(path: string): Promise<void> {
+  try {
+    if ((await lstat(path)).isSymbolicLink()) {
+      throw new Error(`Refusing to write ${path}: it is a symbolic link.`);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
+  }
+}
+
 /** Builds every source, then writes the fonts and one merged stylesheet. Nothing is written if any source fails. */
 export async function buildWebfonts(api: BuildApi, sources: string[], options: BuildOptions): Promise<BuildResult> {
   const deadline = Date.now() + options.timeoutMs;
@@ -143,10 +156,14 @@ export async function buildWebfonts(api: BuildApi, sources: string[], options: B
     }
   }
 
+  const targets = [...files.values()].map(({ name, bytes }) => ({ path: join(options.outputDir, name), bytes }));
+  for (const path of [...targets.map((target) => target.path), options.cssFile]) {
+    await refuseSymlink(path);
+  }
+
   await mkdir(options.outputDir, { recursive: true });
   const written: string[] = [];
-  for (const { name, bytes } of files.values()) {
-    const path = join(options.outputDir, name);
+  for (const { path, bytes } of targets) {
     await writeFile(path, bytes);
     written.push(path);
   }

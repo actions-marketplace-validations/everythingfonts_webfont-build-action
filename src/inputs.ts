@@ -1,4 +1,5 @@
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { realpath } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 export const SUPPORTED_FORMATS = ['woff2', 'woff', 'ttf', 'eot', 'svg'];
 export const FONT_DISPLAY_VALUES = ['auto', 'block', 'swap', 'fallback', 'optional'];
@@ -36,12 +37,53 @@ export function parseTimeoutMinutes(value: string): number {
   return minutes;
 }
 
+const isInside = (root: string, path: string): boolean => {
+  const fromRoot = relative(root, path);
+  return !(fromRoot === '..' || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot));
+};
+
 /** Resolves `value` against the workspace and refuses a path that leaves it. */
 export function resolveInsideWorkspace(workspace: string, value: string, inputName: string): string {
   const path = resolve(workspace, value);
-  const fromWorkspace = relative(resolve(workspace), path);
-  if (fromWorkspace === '..' || fromWorkspace.startsWith(`..${sep}`) || isAbsolute(fromWorkspace)) {
+  if (!isInside(resolve(workspace), path)) {
     throw new Error(`Input ${inputName} must be inside the workspace, got "${value}".`);
   }
   return path;
+}
+
+/** The real path of the nearest existing ancestor (symlinks resolved), with the missing rest appended. */
+async function realPathOfNearestExisting(path: string): Promise<string> {
+  const missing: string[] = [];
+  let current = resolve(path);
+  for (;;) {
+    try {
+      return join(await realpath(current), ...missing.reverse());
+    } catch (error) {
+      const parent = dirname(current);
+      const code = (error as NodeJS.ErrnoException).code;
+      if ((code !== 'ENOENT' && code !== 'ENOTDIR') || parent === current) {
+        throw error;
+      }
+      missing.push(basename(current));
+      current = parent;
+    }
+  }
+}
+
+/** Refuses a directory that the lexical check accepted but that leads outside the workspace through a symlink. */
+export async function assertRealPathInsideWorkspace(
+  workspace: string,
+  directory: string,
+  value: string,
+  inputName: string,
+): Promise<void> {
+  const [realWorkspace, realDirectory] = await Promise.all([
+    realPathOfNearestExisting(workspace),
+    realPathOfNearestExisting(directory),
+  ]);
+  if (!isInside(realWorkspace, realDirectory)) {
+    throw new Error(
+      `Input ${inputName} must be inside the workspace, got "${value}" (it leads outside through a symbolic link).`,
+    );
+  }
 }

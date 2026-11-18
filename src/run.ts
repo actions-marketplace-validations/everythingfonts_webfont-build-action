@@ -1,10 +1,17 @@
 import * as core from '@actions/core';
-import { relative, sep } from 'node:path';
+import { dirname, relative, sep } from 'node:path';
 import pkg from '../package.json';
 import { EfApi, EfApiError } from './api';
 import { buildWebfonts } from './build';
 import { findFonts } from './fonts';
-import { parseFontDisplay, parseFormats, parseList, parseTimeoutMinutes, resolveInsideWorkspace } from './inputs';
+import {
+  assertRealPathInsideWorkspace,
+  parseFontDisplay,
+  parseFormats,
+  parseList,
+  parseTimeoutMinutes,
+  resolveInsideWorkspace,
+} from './inputs';
 
 export const NO_KEY_MESSAGE =
   'Web Font Build needs an Everything Fonts API key with conversion — add it as a secret; secrets are not available to pull requests from forks.';
@@ -62,8 +69,12 @@ export async function run(): Promise<void> {
   const subset = parseList(core.getInput('subset'));
   const fontDisplay = parseFontDisplay(core.getInput('font-display'));
   const timeoutMs = parseTimeoutMinutes(core.getInput('timeout-minutes')) * 60000;
-  const outputDir = resolveInsideWorkspace(workspace, core.getInput('output-dir') || 'webfonts/', 'output-dir');
-  const cssFile = resolveInsideWorkspace(workspace, core.getInput('css-file') || 'webfonts/fonts.css', 'css-file');
+  const outputDirInput = core.getInput('output-dir') || 'webfonts/';
+  const cssFileInput = core.getInput('css-file') || 'webfonts/fonts.css';
+  const outputDir = resolveInsideWorkspace(workspace, outputDirInput, 'output-dir');
+  const cssFile = resolveInsideWorkspace(workspace, cssFileInput, 'css-file');
+  await assertRealPathInsideWorkspace(workspace, outputDir, outputDirInput, 'output-dir');
+  await assertRealPathInsideWorkspace(workspace, dirname(cssFile), cssFileInput, 'css-file');
 
   const patterns = core.getInput('sources', { required: true });
   const sources = await findFonts({ patterns });

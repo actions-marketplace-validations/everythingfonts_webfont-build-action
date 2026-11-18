@@ -1,5 +1,5 @@
 import { strToU8, zipSync } from 'fflate';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -127,5 +127,22 @@ describe('buildWebfonts', () => {
     expect(error.message).toContain('Inter.ttf');
     expect(error.message).toContain('Inter-copy.otf');
     expect(existsSync(join(workspace, 'webfonts'))).toBe(false);
+  });
+
+  it.each([
+    ['a font file', (): string => join(workspace, 'webfonts', 'fonts', 'Inter.woff2'), ['fonts']],
+    ['the stylesheet', (): string => join(workspace, 'webfonts', 'fonts.css'), ['fonts', 'fonts.css']],
+  ])('refuses to write through %s that is an existing symlink, writing nothing', async (_name, target, entries) => {
+    const outside = mkdtempSync(join(tmpdir(), 'wfb-outside-'));
+    writeFileSync(join(outside, 'victim'), 'keep');
+    mkdirSync(join(workspace, 'webfonts', 'fonts'), { recursive: true });
+    symlinkSync(join(outside, 'victim'), target());
+
+    const error = (await build([source('Inter.ttf')]).catch((e: unknown) => e)) as Error;
+
+    expect(error.message).toBe(`Refusing to write ${target()}: it is a symbolic link.`);
+    expect(readFileSync(join(outside, 'victim'), 'utf8')).toBe('keep');
+    expect(readdirSync(join(workspace, 'webfonts')).sort()).toEqual(entries);
+    expect(readdirSync(join(workspace, 'webfonts', 'fonts'))).toEqual(entries.length === 1 ? ['Inter.woff2'] : []);
   });
 });

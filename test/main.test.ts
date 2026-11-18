@@ -1,4 +1,7 @@
 import * as core from '@actions/core';
+import { mkdirSync, mkdtempSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { EfApi, EfApiError } from '../src/api';
 import { buildWebfonts } from '../src/build';
@@ -127,6 +130,36 @@ describe('run', () => {
 
     expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining(`${input} must be inside the workspace`));
     expect(buildWebfonts).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['output-dir', 'linked'],
+    ['output-dir', 'linked/deeper/fonts'],
+    ['css-file', 'linked/fonts.css'],
+  ])('refuses an %s that leaves the workspace through a symlink (%s)', async (input, value) => {
+    const workspace = mkdtempSync(join(tmpdir(), 'wfb-ws-'));
+    const outside = mkdtempSync(join(tmpdir(), 'wfb-outside-'));
+    symlinkSync(outside, join(workspace, 'linked'));
+    process.env.GITHUB_WORKSPACE = workspace;
+    setInputs({ 'api-key': 'k', sources: 'src/*.ttf', [input]: value });
+    await runAction();
+
+    expect(core.setFailed).toHaveBeenCalledWith(
+      `Input ${input} must be inside the workspace, got "${value}" (it leads outside through a symbolic link).`,
+    );
+    expect(buildWebfonts).not.toHaveBeenCalled();
+    expect(EfApi).not.toHaveBeenCalled();
+  });
+
+  it('accepts a symlink that stays inside the workspace', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'wfb-ws-'));
+    mkdirSync(join(workspace, 'real'));
+    symlinkSync(join(workspace, 'real'), join(workspace, 'linked'));
+    process.env.GITHUB_WORKSPACE = workspace;
+    setInputs({ 'api-key': 'k', sources: 'src/*.ttf', 'output-dir': 'linked/fonts' });
+    await runAction();
+
+    expect(core.setFailed).not.toHaveBeenCalled();
   });
 
   it('adds a retry hint to an outage', async () => {
