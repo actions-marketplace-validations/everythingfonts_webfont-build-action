@@ -1,0 +1,26 @@
+name: Smoke
+on:
+  workflow_dispatch:
+    inputs:
+      api-url:
+        description: Base URL of the Everything Fonts API
+        required: false
+        default: https://font.rest/api/v1
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: build
+        uses: ./
+        with:
+          api-key: ${{ secrets.EVERYTHINGFONTS_API_KEY }}
+          sources: test/fixtures/*.ttf
+          api-url: ${{ inputs.api-url }}
+      - name: Check the output
+        run: |
+          set -e
+          ls webfonts/*.woff2
+          test -f webfonts/fonts.css
+          woff2=$(basename "$(ls webfonts/*.woff2 | head -n 1)")
+          grep -q "$woff2" webfonts/fonts.css
