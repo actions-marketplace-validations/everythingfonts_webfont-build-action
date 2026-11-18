@@ -472,6 +472,19 @@ describe('download', () => {
     expect(dump).not.toContain('expires=1');
   });
 
+  it('scrubs the body before cutting it to 200 characters, so no part of a signature at the cut survives', async () => {
+    const signature = 'sig0123456789abcdefSECRET';
+    const url = `https://x/kit.zip?signature=${signature}`;
+    const prefix = 'p'.repeat(200 - 'signature='.length - 8);
+    fetchMock.mockResolvedValue(new Response(`${prefix}signature=${signature} trailing`, { status: 403 }));
+
+    const error = (await makeApi().download(url).catch((e: unknown) => e)) as EfApiError;
+
+    expect(typeof error.body).toBe('string');
+    expect((error.body as string).length).toBeLessThanOrEqual(200);
+    expect(error.body as string).not.toContain('sig0123');
+  });
+
   it('uses its own copy for a failed network download and scrubs the url', async () => {
     fetchMock.mockRejectedValue(new TypeError('fetch failed https://x/kit.zip?signature=abc'));
 
@@ -479,5 +492,18 @@ describe('download', () => {
 
     expect(error.status).toBe(0);
     expect(error.message).toBe('Could not download the built files \u2014 try again.');
+  });
+});
+
+describe('subsetRanges', () => {
+  it('returns the preset ids, labels and categories', async () => {
+    fetchMock.mockResolvedValue(
+      json({ success: { total: 1 }, contents: { ranges: [{ id: 'latin-basic', label: 'Basic Latin', category: 'character', value: 'U+0000-007F' }] } }),
+    );
+
+    const ranges = await makeApi().subsetRanges();
+
+    expect(fetchMock.mock.calls[0][0]).toBe('https://font.rest/api/v1/font/subset/ranges');
+    expect(ranges).toEqual([{ id: 'latin-basic', label: 'Basic Latin', category: 'character' }]);
   });
 });

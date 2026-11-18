@@ -26,6 +26,12 @@ export interface Inspection {
   report_url?: string;
 }
 
+export interface SubsetRange {
+  id: string;
+  label: string;
+  category: string;
+}
+
 export interface EfApiOptions {
   baseUrl: string;
   apiKey: string;
@@ -238,6 +244,20 @@ export class EfApi {
     return body as Uint8Array;
   }
 
+  /** The subset presets a caller can pass to `subset`. Cheap and not rate limited: also used to verify the key. */
+  async subsetRanges(): Promise<SubsetRange[]> {
+    const { body } = await this.request('GET', '/font/subset/ranges');
+    const ranges = this.contents(body).ranges;
+    if (!Array.isArray(ranges)) {
+      throw new EfApiError('Unexpected response from the Everything Fonts API.', { status: 200, body });
+    }
+    return ranges.filter(isRecord).map((range) => ({
+      id: String(range.id ?? ''),
+      label: String(range.label ?? ''),
+      category: String(range.category ?? ''),
+    }));
+  }
+
   /** Fetches a signed URL: no API credentials or client headers are sent. */
   async download(url: string): Promise<Uint8Array> {
     const { body } = await this.request('GET', url, { binary: true, external: true, timeoutMs: this.uploadTimeoutMs });
@@ -375,7 +395,7 @@ export class EfApi {
       const apiError = external
         ? new EfApiError(`Downloading the built files failed (HTTP ${response.status}). The link may have expired; re-run the job.`, {
             status: response.status,
-            body: clean(text.slice(0, 200)),
+            body: clean(text).slice(0, 200),
           })
         : new EfApiError(this.scrub(`Everything Fonts API error (${response.status}): ${message}`), {
             status: response.status,
