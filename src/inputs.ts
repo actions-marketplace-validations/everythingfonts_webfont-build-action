@@ -87,3 +87,28 @@ export async function assertRealPathInsideWorkspace(
     );
   }
 }
+
+export const DEFAULT_API_URL = 'https://font.rest/api/v1';
+
+const LOCAL_HOSTS = ['localhost', '127.0.0.1'];
+
+/** Empty falls back to the default; only https is accepted, or http to localhost / 127.0.0.1. */
+export function parseApiUrl(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed === '') {
+    return DEFAULT_API_URL;
+  }
+  let url: URL | undefined;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    url = undefined;
+  }
+  const allowed = url !== undefined && (url.protocol === 'https:' || (url.protocol === 'http:' && LOCAL_HOSTS.includes(url.hostname)));
+  if (!allowed) {
+    throw new Error(
+      `Input api-url must be an https URL (http is allowed only for localhost and 127.0.0.1), got "${value}".`,
+    );
+  }
+  return trimmed;
+}

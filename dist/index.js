@@ -38833,6 +38833,27 @@ async function assertRealPathInsideWorkspace(workspace, directory, value, inputN
         throw new Error(`Input ${inputName} must be inside the workspace, got "${value}" (it leads outside through a symbolic link).`);
     }
 }
+const DEFAULT_API_URL = 'https://font.rest/api/v1';
+const LOCAL_HOSTS = ['localhost', '127.0.0.1'];
+/** Empty falls back to the default; only https is accepted, or http to localhost / 127.0.0.1. */
+function parseApiUrl(value) {
+    const trimmed = value.trim();
+    if (trimmed === '') {
+        return DEFAULT_API_URL;
+    }
+    let url;
+    try {
+        url = new URL(trimmed);
+    }
+    catch {
+        url = undefined;
+    }
+    const allowed = url !== undefined && (url.protocol === 'https:' || (url.protocol === 'http:' && LOCAL_HOSTS.includes(url.hostname)));
+    if (!allowed) {
+        throw new Error(`Input api-url must be an https URL (http is allowed only for localhost and 127.0.0.1), got "${value}".`);
+    }
+    return trimmed;
+}
 
 ;// CONCATENATED MODULE: ./src/run.ts
 
@@ -38846,7 +38867,6 @@ const NO_KEY_MESSAGE = 'Web Font Build needs an Everything Fonts API key with co
 const PLAN_MESSAGE = 'Web Font Build needs an API plan with conversion — see https://everythingfonts.com/api';
 const KEY_REJECTED_MESSAGE = 'Everything Fonts rejected the API key (HTTP 401). Check the api-key secret (EVERYTHINGFONTS_API_KEY).';
 const RETRY_HINT = 'The Everything Fonts API is unavailable; try again in a few minutes.';
-const DEFAULT_API_URL = 'https://font.rest/api/v1';
 let outputsSet = false;
 function setOutputs(files, cssPath) {
     setOutput('files', files);
@@ -38886,6 +38906,7 @@ async function run() {
         return;
     }
     core_setSecret(apiKey);
+    const apiUrl = parseApiUrl(getInput('api-url'));
     const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
     const formats = parseFormats(getInput('formats'));
     const subset = parseList(getInput('subset'));
@@ -38903,7 +38924,7 @@ async function run() {
         throw new Error(`No font files match sources: ${patterns}`);
     }
     const api = new EfApi({
-        baseUrl: getInput('api-url') || DEFAULT_API_URL,
+        baseUrl: apiUrl,
         apiKey,
         client: `github-action/webfont-build@${package_namespaceObject.rE}`,
         repo: process.env.GITHUB_REPOSITORY,

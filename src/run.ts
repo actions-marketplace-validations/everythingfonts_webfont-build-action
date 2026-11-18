@@ -6,6 +6,7 @@ import { buildWebfonts } from './build';
 import { findFonts } from './fonts';
 import {
   assertRealPathInsideWorkspace,
+  parseApiUrl,
   parseFontDisplay,
   parseFormats,
   parseList,
@@ -22,8 +23,6 @@ export const KEY_REJECTED_MESSAGE =
   'Everything Fonts rejected the API key (HTTP 401). Check the api-key secret (EVERYTHINGFONTS_API_KEY).';
 
 const RETRY_HINT = 'The Everything Fonts API is unavailable; try again in a few minutes.';
-
-const DEFAULT_API_URL = 'https://font.rest/api/v1';
 
 let outputsSet = false;
 
@@ -69,6 +68,7 @@ export async function run(): Promise<void> {
     return;
   }
   core.setSecret(apiKey);
+  const apiUrl = parseApiUrl(core.getInput('api-url'));
 
   const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
   const formats = parseFormats(core.getInput('formats'));
@@ -89,7 +89,7 @@ export async function run(): Promise<void> {
   }
 
   const api = new EfApi({
-    baseUrl: core.getInput('api-url') || DEFAULT_API_URL,
+    baseUrl: apiUrl,
     apiKey,
     client: `github-action/webfont-build@${pkg.version}`,
     repo: process.env.GITHUB_REPOSITORY,

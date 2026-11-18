@@ -164,6 +164,15 @@ describe('run', () => {
     expect(core.setFailed).not.toHaveBeenCalled();
   });
 
+  it('refuses a plain-http api-url before any request', async () => {
+    setInputs({ 'api-key': 'k', sources: 'src/*.ttf', subset: 'latin-basic', 'api-url': 'http://example.com/api/v1' });
+    await runAction();
+
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('Input api-url must be an https URL'));
+    expect(EfApi).not.toHaveBeenCalled();
+    expect(apiMock.subsetRanges).not.toHaveBeenCalled();
+  });
+
   it('adds a retry hint to an outage', async () => {
     setInputs({ 'api-key': 'k', sources: 'src/*.ttf' });
     vi.mocked(buildWebfonts).mockRejectedValue(new EfApiError('Everything Fonts API error (503): down', { status: 503 }));
