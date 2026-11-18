@@ -7,6 +7,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Check the YAML parses
+        run: python3 -c 'import yaml,sys;[yaml.safe_load(open(f)) for f in sys.argv[1:]]' action.yml .github/workflows/*.yml
       - uses: actions/setup-node@v4
         with:
           node-version: 24
