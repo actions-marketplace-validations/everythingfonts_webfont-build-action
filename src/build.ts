@@ -29,17 +29,47 @@ interface Kit {
 
 const EXPIRED_LINK_STATUSES = [403, 410];
 
+const MAX_ENTRY_BYTES = 50 * 1024 * 1024;
+const MAX_KIT_BYTES = 200 * 1024 * 1024;
+
+/** A kit entry (or the kit) is bigger than any real web font: refused before it is inflated. */
+class KitTooLargeError extends Error {}
+
 /** The last path segment of a zip entry name: entry names are never trusted as paths. */
 const entryBaseName = (name: string): string => name.split(/[\\/]/).pop() ?? '';
 
-/** Keeps the requested font files and the stylesheet; everything else (demo.html, …) is dropped. */
+/** Inflates only the stylesheet and the requested font files, within the size caps; demo.html and the rest are never inflated. */
 function readKit(zip: Uint8Array, formats: string[], sourceName: string): Kit {
   const fonts = new Map<string, Uint8Array>();
   let stylesheet: string | undefined;
+  const wanted = (name: string): boolean => {
+    const base = entryBaseName(name);
+    const format = extname(base).slice(1).toLowerCase();
+    return base.toLowerCase() === 'stylesheet.css' || (format !== '' && formats.includes(format));
+  };
+  let requestedBytes = 0;
   let entries: Record<string, Uint8Array>;
   try {
-    entries = unzipSync(zip);
-  } catch {
+    entries = unzipSync(zip, {
+      filter: (file) => {
+        if (!wanted(file.name)) {
+          return false;
+        }
+        const size = Math.max(file.originalSize, file.size);
+        if (size > MAX_ENTRY_BYTES) {
+          throw new KitTooLargeError(`${sourceName}: the built kit's ${entryBaseName(file.name)} is larger than 50 MB.`);
+        }
+        requestedBytes += size;
+        if (requestedBytes > MAX_KIT_BYTES) {
+          throw new KitTooLargeError(`${sourceName}: the built kit's requested files add up to more than 200 MB.`);
+        }
+        return true;
+      },
+    });
+  } catch (error) {
+    if (error instanceof KitTooLargeError) {
+      throw error;
+    }
     throw new Error(`${sourceName}: the downloaded kit is not a valid zip file.`);
   }
   for (const [name, bytes] of Object.entries(entries)) {

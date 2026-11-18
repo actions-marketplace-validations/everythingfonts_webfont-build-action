@@ -41,6 +41,7 @@ export interface EfApiOptions {
   now?: () => number;
   requestTimeoutMs?: number;
   uploadTimeoutMs?: number;
+  maxDownloadBytes?: number;
 }
 
 const QUOTA_TYPES = ['allowance_exhausted', 'upload_limit'];
@@ -51,6 +52,10 @@ const POLL_CAP_MS = 15000;
 const MAX_WAIT_MS = 60000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
 const DEFAULT_UPLOAD_TIMEOUT_MS = 300000;
+
+/** The largest built-kit zip `download` reads (250 MB). */
+export const MAX_DOWNLOAD_BYTES = 250 * 1024 * 1024;
+const DOWNLOAD_TOO_LARGE = 'The built files are larger than 250 MB; the download was stopped.';
 
 /** sha256 hex of `owner/repo`, so the plain repository name is never sent. */
 export function repoHash(repository: string): string {
@@ -87,6 +92,7 @@ interface RequestOptions {
   binary?: boolean;
   external?: boolean;
   accept?: string;
+  maxBytes?: number;
 }
 
 const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -125,6 +131,40 @@ function allowanceFromHeaders(headers: Headers): Allowance | undefined {
   };
 }
 
+/** Reads a body of at most `maxBytes`: refused up front by Content-Length, and counted while it streams. */
+async function readCapped(response: Response, maxBytes: number): Promise<Uint8Array> {
+  const declared = Number(response.headers.get('Content-Length'));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new Error(DOWNLOAD_TOO_LARGE);
+  }
+  if (response.body === null) {
+    return new Uint8Array(0);
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw new Error(DOWNLOAD_TOO_LARGE);
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
 export class EfApi {
   private readonly baseUrl: string;
   private readonly apiKey: string;
@@ -134,6 +174,7 @@ export class EfApi {
   private readonly now: () => number;
   private readonly requestTimeoutMs: number;
   private readonly uploadTimeoutMs: number;
+  private readonly maxDownloadBytes: number;
 
   constructor(opts: EfApiOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/+$/, '');
@@ -144,6 +185,7 @@ export class EfApi {
     this.now = opts.now ?? Date.now;
     this.requestTimeoutMs = opts.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.uploadTimeoutMs = opts.uploadTimeoutMs ?? DEFAULT_UPLOAD_TIMEOUT_MS;
+    this.maxDownloadBytes = opts.maxDownloadBytes ?? MAX_DOWNLOAD_BYTES;
   }
 
   async uploadFont(path: string): Promise<string> {
@@ -260,7 +302,12 @@ export class EfApi {
 
   /** Fetches a signed URL: no API credentials or client headers are sent. */
   async download(url: string): Promise<Uint8Array> {
-    const { body } = await this.request('GET', url, { binary: true, external: true, timeoutMs: this.uploadTimeoutMs });
+    const { body } = await this.request('GET', url, {
+      binary: true,
+      external: true,
+      timeoutMs: this.uploadTimeoutMs,
+      maxBytes: this.maxDownloadBytes,
+    });
     return body as Uint8Array;
   }
 
@@ -372,7 +419,9 @@ export class EfApi {
       }
 
       if (response.ok && binary) {
-        return { body: new Uint8Array(await response.arrayBuffer()), headers: response.headers };
+        const bytes =
+          options.maxBytes === undefined ? new Uint8Array(await response.arrayBuffer()) : await readCapped(response, options.maxBytes);
+        return { body: bytes, headers: response.headers };
       }
 
       const text = await response.text();

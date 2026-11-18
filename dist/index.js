@@ -31694,6 +31694,9 @@ const POLL_CAP_MS = 15000;
 const MAX_WAIT_MS = 60000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
 const DEFAULT_UPLOAD_TIMEOUT_MS = 300000;
+/** The largest built-kit zip `download` reads (250 MB). */
+const MAX_DOWNLOAD_BYTES = 250 * 1024 * 1024;
+const DOWNLOAD_TOO_LARGE = 'The built files are larger than 250 MB; the download was stopped.';
 /** sha256 hex of `owner/repo`, so the plain repository name is never sent. */
 function repoHash(repository) {
     return (0,external_node_crypto_.createHash)('sha256').update(repository).digest('hex');
@@ -31748,6 +31751,39 @@ function allowanceFromHeaders(headers) {
         resetsAt: Number.isFinite(reset) && reset > 0 ? new Date(reset * 1000).toISOString() : '',
     };
 }
+/** Reads a body of at most `maxBytes`: refused up front by Content-Length, and counted while it streams. */
+async function readCapped(response, maxBytes) {
+    const declared = Number(response.headers.get('Content-Length'));
+    if (Number.isFinite(declared) && declared > maxBytes) {
+        await response.body?.cancel().catch(() => undefined);
+        throw new Error(DOWNLOAD_TOO_LARGE);
+    }
+    if (response.body === null) {
+        return new Uint8Array(0);
+    }
+    const reader = response.body.getReader();
+    const chunks = [];
+    let total = 0;
+    for (;;) {
+        const { done, value } = await reader.read();
+        if (done) {
+            break;
+        }
+        total += value.byteLength;
+        if (total > maxBytes) {
+            await reader.cancel().catch(() => undefined);
+            throw new Error(DOWNLOAD_TOO_LARGE);
+        }
+        chunks.push(value);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.byteLength;
+    }
+    return bytes;
+}
 class EfApi {
     baseUrl;
     apiKey;
@@ -31757,6 +31793,7 @@ class EfApi {
     now;
     requestTimeoutMs;
     uploadTimeoutMs;
+    maxDownloadBytes;
     constructor(opts) {
         this.baseUrl = opts.baseUrl.replace(/\/+$/, '');
         this.apiKey = opts.apiKey;
@@ -31766,6 +31803,7 @@ class EfApi {
         this.now = opts.now ?? Date.now;
         this.requestTimeoutMs = opts.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
         this.uploadTimeoutMs = opts.uploadTimeoutMs ?? DEFAULT_UPLOAD_TIMEOUT_MS;
+        this.maxDownloadBytes = opts.maxDownloadBytes ?? MAX_DOWNLOAD_BYTES;
     }
     async uploadFont(path) {
         const bytes = await (0,promises_namespaceObject.readFile)(path);
@@ -31866,7 +31904,12 @@ class EfApi {
     }
     /** Fetches a signed URL: no API credentials or client headers are sent. */
     async download(url) {
-        const { body } = await this.request('GET', url, { binary: true, external: true, timeoutMs: this.uploadTimeoutMs });
+        const { body } = await this.request('GET', url, {
+            binary: true,
+            external: true,
+            timeoutMs: this.uploadTimeoutMs,
+            maxBytes: this.maxDownloadBytes,
+        });
         return body;
     }
     async fetchInspection(id, deadline) {
@@ -31961,7 +32004,8 @@ class EfApi {
                         : `Could not reach the Everything Fonts API: ${reason}`), { status: 0 });
             }
             if (response.ok && binary) {
-                return { body: new Uint8Array(await response.arrayBuffer()), headers: response.headers };
+                const bytes = options.maxBytes === undefined ? new Uint8Array(await response.arrayBuffer()) : await readCapped(response, options.maxBytes);
+                return { body: bytes, headers: response.headers };
             }
             const text = await response.text();
             let body = null;
@@ -34767,17 +34811,46 @@ function mergeStylesheets(stylesheets, opts) {
 
 
 const EXPIRED_LINK_STATUSES = [403, 410];
+const MAX_ENTRY_BYTES = 50 * 1024 * 1024;
+const MAX_KIT_BYTES = 200 * 1024 * 1024;
+/** A kit entry (or the kit) is bigger than any real web font: refused before it is inflated. */
+class KitTooLargeError extends Error {
+}
 /** The last path segment of a zip entry name: entry names are never trusted as paths. */
 const entryBaseName = (name) => name.split(/[\\/]/).pop() ?? '';
-/** Keeps the requested font files and the stylesheet; everything else (demo.html, …) is dropped. */
+/** Inflates only the stylesheet and the requested font files, within the size caps; demo.html and the rest are never inflated. */
 function readKit(zip, formats, sourceName) {
     const fonts = new Map();
     let stylesheet;
+    const wanted = (name) => {
+        const base = entryBaseName(name);
+        const format = (0,external_node_path_namespaceObject.extname)(base).slice(1).toLowerCase();
+        return base.toLowerCase() === 'stylesheet.css' || (format !== '' && formats.includes(format));
+    };
+    let requestedBytes = 0;
     let entries;
     try {
-        entries = unzipSync(zip);
+        entries = unzipSync(zip, {
+            filter: (file) => {
+                if (!wanted(file.name)) {
+                    return false;
+                }
+                const size = Math.max(file.originalSize, file.size);
+                if (size > MAX_ENTRY_BYTES) {
+                    throw new KitTooLargeError(`${sourceName}: the built kit's ${entryBaseName(file.name)} is larger than 50 MB.`);
+                }
+                requestedBytes += size;
+                if (requestedBytes > MAX_KIT_BYTES) {
+                    throw new KitTooLargeError(`${sourceName}: the built kit's requested files add up to more than 200 MB.`);
+                }
+                return true;
+            },
+        });
     }
-    catch {
+    catch (error) {
+        if (error instanceof KitTooLargeError) {
+            throw error;
+        }
         throw new Error(`${sourceName}: the downloaded kit is not a valid zip file.`);
     }
     for (const [name, bytes] of Object.entries(entries)) {

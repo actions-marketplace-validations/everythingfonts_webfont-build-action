@@ -1,4 +1,4 @@
-import { strToU8, zipSync } from 'fflate';
+import { strFromU8, strToU8, zipSync } from 'fflate';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,6 +18,26 @@ const kitZip = (family: string, extra: Record<string, Uint8Array> = {}): Uint8Ar
     'demo.html': strToU8('<html></html>'),
     ...extra,
   });
+
+/** Edits the central-directory header of the entry `name` in place. */
+const patchCentralEntry = (zip: Uint8Array, name: string, patch: (view: DataView, offset: number) => void): Uint8Array => {
+  const view = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
+  for (let offset = 0; offset + 46 <= zip.length; offset++) {
+    if (view.getUint32(offset, true) === 0x02014b50) {
+      const nameLength = view.getUint16(offset + 28, true);
+      if (strFromU8(zip.subarray(offset + 46, offset + 46 + nameLength)) === name) {
+        patch(view, offset);
+      }
+    }
+  }
+  return zip;
+};
+
+/** Rewrites the uncompressed size declared for `name`, as a zip bomb would. */
+const declareSize = (zip: Uint8Array, name: string, size: number): Uint8Array =>
+  patchCentralEntry(zip, name, (view, offset) => view.setUint32(offset + 24, size, true));
+
+const MB = 1024 * 1024;
 
 let workspace: string;
 let api: { [K in keyof BuildApi]: ReturnType<typeof vi.fn> };
@@ -144,5 +164,37 @@ describe('buildWebfonts', () => {
     expect(readFileSync(join(outside, 'victim'), 'utf8')).toBe('keep');
     expect(readdirSync(join(workspace, 'webfonts')).sort()).toEqual(entries);
     expect(readdirSync(join(workspace, 'webfonts', 'fonts'))).toEqual(entries.length === 1 ? ['Inter.woff2'] : []);
+  });
+
+  it('rejects a requested entry that declares more than 50 MB, writing nothing', async () => {
+    api.download.mockResolvedValue(declareSize(kitZip('Inter'), 'Inter.woff2', 50 * MB + 1));
+
+    const error = (await build([source('Inter.ttf')]).catch((e: unknown) => e)) as Error;
+
+    expect(error.message).toBe("Inter.ttf: the built kit's Inter.woff2 is larger than 50 MB.");
+    expect(existsSync(join(workspace, 'webfonts'))).toBe(false);
+  });
+
+  it('rejects a kit whose requested entries add up to more than 200 MB', async () => {
+    const formats = ['woff2', 'woff', 'ttf', 'eot', 'svg'];
+    let zip = kitZip('Inter', Object.fromEntries(formats.slice(1).map((format) => [`Inter.${format}`, new Uint8Array([1])])));
+    for (const format of formats) {
+      zip = declareSize(zip, `Inter.${format}`, 45 * MB);
+    }
+    api.download.mockResolvedValue(zip);
+
+    const error = (await build([source('Inter.ttf')], { formats }).catch((e: unknown) => e)) as Error;
+
+    expect(error.message).toBe("Inter.ttf: the built kit's requested files add up to more than 200 MB.");
+  });
+
+  it('never inflates entries that were not requested, whatever they declare', async () => {
+    const zip = declareSize(kitZip('Inter', { 'Inter.woff': new Uint8Array([5]) }), 'demo.html', 4000 * MB);
+    patchCentralEntry(zip, 'demo.html', (view, offset) => view.setUint16(offset + 10, 99, true));
+    api.download.mockResolvedValue(zip);
+
+    const result = await build([source('Inter.ttf')]);
+
+    expect(result.files).toEqual([join(workspace, 'webfonts', 'fonts', 'Inter.woff2')]);
   });
 });

@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { EfApi, EfApiError, repoHash } from '../src/api';
+import { EfApi, EfApiError, MAX_DOWNLOAD_BYTES, repoHash } from '../src/api';
 
 const json = (body: unknown, init: ResponseInit = {}): Response =>
   new Response(JSON.stringify(body), {
@@ -483,6 +483,52 @@ describe('download', () => {
     expect(typeof error.body).toBe('string');
     expect((error.body as string).length).toBeLessThanOrEqual(200);
     expect(error.body as string).not.toContain('sig0123');
+  });
+
+  it('stops a download whose Content-Length is over the cap without reading the body', async () => {
+    let pulled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled++;
+        controller.enqueue(new Uint8Array(10));
+      },
+    });
+    fetchMock.mockResolvedValue(new Response(body, { headers: { 'Content-Length': '101' } }));
+
+    const error = (await makeApi('owner/repo', { maxDownloadBytes: 100 })
+      .download('https://x/kit.zip?signature=abc')
+      .catch((e: unknown) => e)) as Error;
+
+    expect(error.message).toBe('The built files are larger than 250 MB; the download was stopped.');
+    expect(error).not.toBeInstanceOf(EfApiError);
+    expect(pulled).toBeLessThanOrEqual(1);
+  });
+
+  it('stops a download that grows past the cap while it is read', async () => {
+    let chunks = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        chunks++;
+        controller.enqueue(new Uint8Array(40));
+      },
+    });
+    fetchMock.mockResolvedValue(new Response(body));
+
+    const error = (await makeApi('owner/repo', { maxDownloadBytes: 100 })
+      .download('https://x/kit.zip')
+      .catch((e: unknown) => e)) as Error;
+
+    expect(error.message).toBe('The built files are larger than 250 MB; the download was stopped.');
+    expect(chunks).toBeLessThan(10);
+  });
+
+  it('accepts a download exactly at the cap and defaults the cap to 250 MB', async () => {
+    fetchMock.mockResolvedValue(new Response(new Uint8Array(100), { headers: { 'Content-Length': '100' } }));
+
+    const bytes = await makeApi('owner/repo', { maxDownloadBytes: 100 }).download('https://x/kit.zip');
+
+    expect(bytes.length).toBe(100);
+    expect(MAX_DOWNLOAD_BYTES).toBe(250 * 1024 * 1024);
   });
 
   it('uses its own copy for a failed network download and scrubs the url', async () => {
