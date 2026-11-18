@@ -1,0 +1,49 @@
+name: Everything Fonts Web Font Build
+description: Build WOFF2/WOFF files and @font-face CSS from your font sources with Everything Fonts.
+author: Everything Fonts
+branding:
+  icon: package
+  color: blue
+inputs:
+  api-key:
+    description: Everything Fonts API key (store it as a repository secret).
+    required: true
+  sources:
+    description: Glob patterns (one per line or comma-separated) of the font files to convert.
+    required: true
+  formats:
+    description: Comma-separated output formats.
+    required: false
+    default: woff2
+  subset:
+    description: Comma-separated subset preset ids. No subsetting when empty.
+    required: false
+    default: ''
+  output-dir:
+    description: Directory the built font files are written to.
+    required: false
+    default: webfonts/
+  css-file:
+    description: Path of the generated @font-face stylesheet.
+    required: false
+    default: webfonts/fonts.css
+  font-display:
+    description: The font-display value written into the @font-face rules.
+    required: false
+    default: swap
+  api-url:
+    description: Base URL of the Everything Fonts API.
+    required: false
+    default: https://font.rest/api/v1
+  timeout-minutes:
+    description: Overall time to wait for builds to finish.
+    required: false
+    default: '10'
+outputs:
+  files:
+    description: Newline-separated list of the files that were written.
+  css-path:
+    description: Path of the generated stylesheet.
+runs:
+  using: node24
+  main: dist/index.js

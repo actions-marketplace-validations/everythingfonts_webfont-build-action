@@ -1,0 +1,25 @@
+{
+  "name": "webfont-build-action",
+  "version": "1.0.0",
+  "description": "Build WOFF2/WOFF and @font-face CSS from your font sources - Everything Fonts",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "ncc build src/main.ts -o dist --license licenses.txt",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "author": "everythingfonts.com",
+  "license": "MIT",
+  "dependencies": {
+    "@actions/core": "3.0.1",
+    "@actions/glob": "0.7.0",
+    "fflate": "0.8.3"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "@vercel/ncc": "0.45.0",
+    "typescript": "5.9.3",
+    "vitest": "5.1.1"
+  },
+  "private": true
+}
