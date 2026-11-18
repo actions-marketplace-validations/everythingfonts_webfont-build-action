@@ -34942,8 +34942,8 @@ async function buildWebfonts(api, sources, options) {
                 const key = name.toLowerCase();
                 const existing = files.get(key);
                 if (existing) {
-                    throw new Error(`${(0,external_node_path_namespaceObject.basename)(existing.source)} and ${(0,external_node_path_namespaceObject.basename)(source)} both produce ${name}; ` +
-                        'give the fonts different family names or build them in separate steps.');
+                    throw new Error(`${(0,external_node_path_namespaceObject.basename)(existing.source)} and ${(0,external_node_path_namespaceObject.basename)(source)} both produce ${name} \u2014 ` +
+                        'rename one of the source files (e.g. Inter.ttf vs Inter.otf) or build them in separate steps with different output-dir.');
                 }
                 files.set(key, { name, source, bytes });
             }

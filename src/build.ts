@@ -172,8 +172,8 @@ export async function buildWebfonts(api: BuildApi, sources: string[], options: B
         const existing = files.get(key);
         if (existing) {
           throw new Error(
-            `${basename(existing.source)} and ${basename(source)} both produce ${name}; ` +
-              'give the fonts different family names or build them in separate steps.',
+            `${basename(existing.source)} and ${basename(source)} both produce ${name} \u2014 ` +
+              'rename one of the source files (e.g. Inter.ttf vs Inter.otf) or build them in separate steps with different output-dir.',
           );
         }
         files.set(key, { name, source, bytes });

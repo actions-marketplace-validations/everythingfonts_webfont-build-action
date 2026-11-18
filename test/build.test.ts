@@ -143,9 +143,9 @@ describe('buildWebfonts', () => {
   it('fails on two sources that produce the same file name, writing nothing', async () => {
     const error = (await build([source('Inter.ttf'), source('Inter-copy.otf')]).catch((e: unknown) => e)) as Error;
 
-    expect(error.message).toContain('Inter.woff2');
-    expect(error.message).toContain('Inter.ttf');
-    expect(error.message).toContain('Inter-copy.otf');
+    expect(error.message).toBe(
+      'Inter.ttf and Inter-copy.otf both produce Inter.woff2 \u2014 rename one of the source files (e.g. Inter.ttf vs Inter.otf) or build them in separate steps with different output-dir.',
+    );
     expect(existsSync(join(workspace, 'webfonts'))).toBe(false);
   });
 
