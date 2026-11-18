@@ -2,14 +2,16 @@ name: CI
 on:
   push:
   pull_request:
+permissions:
+  contents: read
 jobs:
   ci:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Check the YAML parses
         run: python3 -c 'import yaml,sys;[yaml.safe_load(open(f)) for f in sys.argv[1:]]' action.yml .github/workflows/*.yml
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm

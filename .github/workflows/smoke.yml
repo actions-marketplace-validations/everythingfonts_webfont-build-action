@@ -6,11 +6,13 @@ on:
         description: Base URL of the Everything Fonts API
         required: false
         default: https://font.rest/api/v1
+permissions:
+  contents: read
 jobs:
   smoke:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - id: build
         uses: ./
         with:
