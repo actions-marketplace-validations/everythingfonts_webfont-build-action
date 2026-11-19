@@ -1,17 +1,12 @@
-import { execFileSync } from 'node:child_process';
-import { readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { parse } from 'yaml';
 
 const root = join(__dirname, '..');
 
-/** Parses YAML with PyYAML (preinstalled on GitHub's ubuntu runners), so no YAML package is needed. */
-const loadYaml = (file: string): Record<string, unknown> =>
-  JSON.parse(
-    execFileSync('python3', ['-c', 'import json,sys,yaml;print(json.dumps(yaml.safe_load(open(sys.argv[1]))))', file], {
-      encoding: 'utf8',
-    }),
-  );
+/** Parses a YAML file the same way GitHub reads action.yml and workflows. */
+const loadYaml = (file: string): Record<string, unknown> => parse(readFileSync(file, 'utf8'));
 
 describe('action.yml', () => {
   it('parses and declares the documented inputs and outputs', () => {
