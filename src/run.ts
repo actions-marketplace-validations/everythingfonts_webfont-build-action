@@ -17,7 +17,8 @@ import {
 export const NO_KEY_MESSAGE =
   'Web Font Build needs an Everything Fonts API key with conversion — add it as a secret; secrets are not available to pull requests from forks.';
 
-export const PLAN_MESSAGE = 'Web Font Build needs an API plan with conversion — see https://everythingfonts.com/api';
+export const PLAN_MESSAGE =
+  'Web Font Build needs an API key whose plan includes the @font-face kit (tools:font-face), not a CI key — see https://everythingfonts.com/api.';
 
 export const KEY_REJECTED_MESSAGE =
   'Everything Fonts rejected the API key (HTTP 401). Check the api-key secret (EVERYTHINGFONTS_API_KEY).';
@@ -40,8 +41,14 @@ export function handleFailure(error: unknown): void {
   core.setFailed(error instanceof Error ? error.message : String(error));
 }
 
+/** The server's own words from an API error, with the key masked. */
+function serverReason(error: EfApiError, apiKey: string): string {
+  const reason = error.message.replace(/^Everything Fonts API error \(\d+\): /, '').trim();
+  return apiKey === '' ? reason : reason.split(apiKey).join('***');
+}
+
 /** Turns API errors into the messages a workflow author can act on. */
-function explain(error: unknown): unknown {
+function explain(error: unknown, apiKey: string): unknown {
   if (!(error instanceof EfApiError)) {
     return error;
   }
@@ -49,7 +56,8 @@ function explain(error: unknown): unknown {
     return new Error(KEY_REJECTED_MESSAGE);
   }
   if (error.status === 403 && !error.isQuota()) {
-    return new Error(PLAN_MESSAGE);
+    const reason = serverReason(error, apiKey);
+    return new Error(reason === '' ? PLAN_MESSAGE : `${PLAN_MESSAGE} The server said: ${reason}`);
   }
   if (error.status === 0 || error.status >= 500) {
     return new Error(`${error.message} ${RETRY_HINT}`);
@@ -108,6 +116,6 @@ export async function run(): Promise<void> {
     setOutputs(files.join('\n'), workspacePath(workspace, result.cssPath));
     core.info(`Wrote ${files.length} font file(s) and ${workspacePath(workspace, result.cssPath)}`);
   } catch (error) {
-    throw explain(error);
+    throw explain(error, apiKey);
   }
 }

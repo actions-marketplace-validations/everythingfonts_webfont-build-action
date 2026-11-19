@@ -79,13 +79,27 @@ describe('run', () => {
     );
   });
 
+  it("passes on the server's reason for a 403, so a CI key or a missing tool is named", async () => {
+    setInputs({ 'api-key': 'ef_live_key_123', sources: 'src/*.ttf', subset: 'latin-basic' });
+    apiMock.subsetRanges.mockRejectedValue(
+      new EfApiError('Everything Fonts API error (403): Forbidden: a CI key can only upload fonts and run health checks', { status: 403 }),
+    );
+    await runAction();
+
+    expect(core.setFailed).toHaveBeenCalledWith(
+      `${PLAN_MESSAGE} The server said: Forbidden: a CI key can only upload fonts and run health checks`,
+    );
+  });
+
   it('fails with the plan message, without the key, when the pre-flight answers 403', async () => {
     setInputs({ 'api-key': 'secret-key', sources: 'src/*.ttf', subset: 'latin-basic' });
     apiMock.subsetRanges.mockRejectedValue(new EfApiError('Everything Fonts API error (403): secret-key forbidden', { status: 403 }));
     await runAction();
 
-    expect(core.setFailed).toHaveBeenCalledWith(PLAN_MESSAGE);
-    expect(PLAN_MESSAGE).toBe('Web Font Build needs an API plan with conversion — see https://everythingfonts.com/api');
+    expect(core.setFailed).toHaveBeenCalledWith(`${PLAN_MESSAGE} The server said: *** forbidden`);
+    expect(PLAN_MESSAGE).toBe(
+      'Web Font Build needs an API key whose plan includes the @font-face kit (tools:font-face), not a CI key — see https://everythingfonts.com/api.',
+    );
     expect(buildWebfonts).not.toHaveBeenCalled();
     expect(output('files')).toBe('');
   });

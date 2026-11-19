@@ -1,6 +1,6 @@
 {
   "name": "webfont-build-action",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Build WOFF2/WOFF and @font-face CSS from your font sources - Everything Fonts",
   "main": "dist/index.js",
   "scripts": {

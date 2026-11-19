@@ -2,7 +2,7 @@
 
 A GitHub Action that builds WOFF2 (and WOFF) files and an `@font-face` stylesheet from the font files in your repository, using [Everything Fonts](https://everythingfonts.com). It builds the same kit as the [@font-face generator](https://everythingfonts.com/font-face) (see the [@font-face kit API](https://everythingfonts.com/api/fontface)), and can subset fonts first like the [Font Subsetter](https://everythingfonts.com/subsetter). It never commits anything: it writes to the workspace, and you decide what happens next.
 
-It needs an API key on a paid API plan with conversion. See <https://everythingfonts.com/api>. Store the key as a repository secret named `EVERYTHINGFONTS_API_KEY`.
+It needs an API key on a paid API plan that includes the @font-face kit tool (a free CI key will not work). See <https://everythingfonts.com/api>. Store the key as a repository secret named `EVERYTHINGFONTS_API_KEY`.
 
 For a one-off conversion without a workflow, use the [font converter](https://everythingfonts.com/font-converter). To check your source fonts for problems before building, run [Font Check](https://github.com/everythingfonts/font-check-action) in CI or the [Font Inspector](https://everythingfonts.com/font-inspector); [Font Doctor](https://everythingfonts.com/font-doctor) repairs what it finds.
 

@@ -31677,7 +31677,7 @@ function getIDToken(aud) {
 ;// CONCATENATED MODULE: external "node:path"
 const external_node_path_namespaceObject = require("node:path");
 ;// CONCATENATED MODULE: ./package.json
-const package_namespaceObject = {"rE":"1.0.0"};
+const package_namespaceObject = {"rE":"1.0.1"};
 // EXTERNAL MODULE: external "node:crypto"
 var external_node_crypto_ = __nccwpck_require__(7598);
 ;// CONCATENATED MODULE: external "node:fs/promises"
@@ -38866,7 +38866,7 @@ function parseApiUrl(value) {
 
 
 const NO_KEY_MESSAGE = 'Web Font Build needs an Everything Fonts API key with conversion — add it as a secret; secrets are not available to pull requests from forks.';
-const PLAN_MESSAGE = 'Web Font Build needs an API plan with conversion — see https://everythingfonts.com/api';
+const PLAN_MESSAGE = 'Web Font Build needs an API key whose plan includes the @font-face kit (tools:font-face), not a CI key — see https://everythingfonts.com/api.';
 const KEY_REJECTED_MESSAGE = 'Everything Fonts rejected the API key (HTTP 401). Check the api-key secret (EVERYTHINGFONTS_API_KEY).';
 const RETRY_HINT = 'The Everything Fonts API is unavailable; try again in a few minutes.';
 let outputsSet = false;
@@ -38882,8 +38882,13 @@ function handleFailure(error) {
     }
     setFailed(error instanceof Error ? error.message : String(error));
 }
+/** The server's own words from an API error, with the key masked. */
+function serverReason(error, apiKey) {
+    const reason = error.message.replace(/^Everything Fonts API error \(\d+\): /, '').trim();
+    return apiKey === '' ? reason : reason.split(apiKey).join('***');
+}
 /** Turns API errors into the messages a workflow author can act on. */
-function explain(error) {
+function explain(error, apiKey) {
     if (!(error instanceof EfApiError)) {
         return error;
     }
@@ -38891,7 +38896,8 @@ function explain(error) {
         return new Error(KEY_REJECTED_MESSAGE);
     }
     if (error.status === 403 && !error.isQuota()) {
-        return new Error(PLAN_MESSAGE);
+        const reason = serverReason(error, apiKey);
+        return new Error(reason === '' ? PLAN_MESSAGE : `${PLAN_MESSAGE} The server said: ${reason}`);
     }
     if (error.status === 0 || error.status >= 500) {
         return new Error(`${error.message} ${RETRY_HINT}`);
@@ -38945,7 +38951,7 @@ async function run() {
         info(`Wrote ${files.length} font file(s) and ${workspacePath(workspace, result.cssPath)}`);
     }
     catch (error) {
-        throw explain(error);
+        throw explain(error, apiKey);
     }
 }
 
